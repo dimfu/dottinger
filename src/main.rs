@@ -18,10 +18,18 @@ struct Args {
 enum Commands {
     #[command(about = "Print all environment variables")]
     Print,
+
     #[command(about = "Get environment value by providing key")]
     Get { key: String },
-    #[command(about = "Update existing environment variable")]
+
+    #[command(about = "Update existing variable")]
     Set { key: String, value: String },
+
+    #[command(about = "Disable/comment variable")]
+    Disable { key: String },
+
+    #[command(about = "Enable/uncomment variable")]
+    Enable { key: String },
 }
 
 fn main() -> io::Result<()> {
@@ -34,9 +42,7 @@ fn main() -> io::Result<()> {
 
     match args.command {
         Commands::Print => {
-            for (key, value) in env.map.iter() {
-                println!("{key}:{}", String::from_utf8_lossy(value));
-            }
+            println!("{env}");
         }
         Commands::Get { key } => match env.get_with_key(&key) {
             Ok(val) => println!("Value: {val}"),
@@ -47,6 +53,20 @@ fn main() -> io::Result<()> {
                 eprintln!("Failed to update key: {}", e);
             } else {
                 println!("Key updated successfully");
+            }
+        }
+        Commands::Disable { key } => {
+            if let Err(e) = env.toggle(&key, environment::KeyStatus::Disable) {
+                eprintln!("Failed toggle update key: {}", e);
+            } else {
+                println!("Key disabled successfully");
+            }
+        }
+        Commands::Enable { key } => {
+            if let Err(e) = env.toggle(&key, environment::KeyStatus::Enable) {
+                eprintln!("Failed toggle update key: {}", e);
+            } else {
+                println!("Key enabled successfully");
             }
         }
     }

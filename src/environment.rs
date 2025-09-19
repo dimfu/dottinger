@@ -1,12 +1,30 @@
 use std::fs::File;
 use std::io::{BufRead, Cursor, Read};
-use std::{collections::HashMap, fs::OpenOptions, io};
+use std::{collections::HashMap, fmt, fs::OpenOptions, io};
+
+pub enum KeyStatus {
+    Enable,
+    Disable,
+}
 
 pub struct Environment {
-    pub map: HashMap<String, Vec<u8>>,
+    pub map: HashMap<String, (usize, usize, usize)>,
     buf: Vec<u8>,
     file: Option<File>,
     path: String,
+}
+
+impl fmt::Display for Environment {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (key, (_, start, end)) in &self.map {
+            if let Ok(s) = std::str::from_utf8(&self.buf[*start..*end]) {
+                writeln!(f, "{} = {}", key, s)?;
+            } else {
+                writeln!(f, "{} = <invalid utf-8>", key)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Environment {
@@ -38,43 +56,10 @@ impl Environment {
         file.read_to_end(&mut self.buf)?;
         self.file = Some(file);
 
-        let env_content = String::from_utf8_lossy(&self.buf);
-        for line in env_content.lines() {
-            if let Some((key, value)) = line.split_once("=") {
-                self.map
-                    .insert(String::from(key), value.as_bytes().to_vec());
-            }
-        }
-
-        Ok(())
-    }
-
-    fn key_exists(&self, key: &String) -> bool {
-        self.map.contains_key(key)
-    }
-
-    pub fn get_with_key(&self, key: &String) -> io::Result<String> {
-        match self.map.get(key) {
-            Some(val) => {
-                let s = String::from_utf8(val.clone())
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid UTF-8"))?;
-                Ok(s)
-            }
-            None => Err(io::Error::new(io::ErrorKind::NotFound, "key doesn't exist")),
-        }
-    }
-
-    // update an existing environment key with new value
-    pub fn set(&mut self, target_key: &String, new_value: Vec<u8>) -> io::Result<()> {
-        if !self.key_exists(target_key) {
-            return Err(io::Error::new(io::ErrorKind::NotFound, "key doesn't exist"));
-        }
-
         let mut cursor = Cursor::new(&self.buf);
-        let mut offset = 0;
+        let mut line_offset = 0;
         let mut line = String::new();
 
-        // find the exact key buf position
         loop {
             line.clear();
             let n = match cursor.read_line(&mut line) {
@@ -82,24 +67,78 @@ impl Environment {
                 Ok(n) => n,
             };
 
-            let line_bytes = &self.buf[offset..offset + n];
+            let line_bytes = &self.buf[line_offset..line_offset + n];
             let line_str = String::from_utf8_lossy(line_bytes);
 
             if let Some((key, _)) = line_str.trim_end().split_once('=') {
-                if key == target_key {
-                    let value_start = offset + key.len() + 1;
-                    let value_end = offset + line_str.trim_end().len();
+                let cleaned_key = key.trim_start_matches(|c: char| c == '#' || c.is_whitespace());
+                let value_start = line_offset + key.len() + 1;
+                let value_end = line_offset + line_str.trim_end().len();
 
-                    self.buf
-                        .splice(value_start..value_end, new_value.iter().cloned());
-                    break;
-                }
+                self.map.insert(
+                    String::from(cleaned_key),
+                    (line_offset, value_start, value_end),
+                );
             }
 
-            offset += n;
+            line_offset += n;
+        }
+
+        println!("{self}");
+
+        Ok(())
+    }
+
+    pub fn get_with_key(&self, key: &String) -> io::Result<String> {
+        match self.map.get(key) {
+            Some((_, start, end)) => match String::from_utf8(self.buf[*start..*end].to_vec()) {
+                Ok(s) => Ok(s),
+                Err(_) => Err(io::Error::new(io::ErrorKind::InvalidData, "invalid utf-8")),
+            },
+            None => Err(io::Error::new(io::ErrorKind::NotFound, "doesn't exist")),
+        }
+    }
+
+    pub fn set(&mut self, key: &String, new_value: Vec<u8>) -> io::Result<()> {
+        let (start, end) = match self.map.get(key) {
+            Some((_, start, end)) => (*start, *end),
+            None => {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "doesn't exist"));
+            }
+        };
+
+        self.buf.splice(start..end, new_value.iter().cloned());
+        self.write_buf()?;
+
+        Ok(())
+    }
+
+    pub fn toggle(&mut self, key: &String, status: KeyStatus) -> io::Result<()> {
+        let line_offset = match self.map.get(key) {
+            Some((line_offset, _, _)) => *line_offset,
+            None => {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "doesn't exist"));
+            }
+        };
+
+        match status {
+            KeyStatus::Disable => {
+                self.buf
+                    .splice(line_offset..line_offset, b"#".iter().cloned());
+            }
+            KeyStatus::Enable => {
+                // check if the current line offset is a comment
+                if self.buf.get(line_offset) == Some(&b'#') {
+                    self.buf
+                        .splice(line_offset..line_offset + 1, std::iter::empty());
+                } else {
+                    return Err(io::Error::new(io::ErrorKind::NotFound, "already enabled"));
+                }
+            }
         }
 
         self.write_buf()?;
-        return Ok(());
+
+        Ok(())
     }
 }
