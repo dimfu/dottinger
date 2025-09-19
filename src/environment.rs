@@ -97,23 +97,87 @@ impl Environment {
         }
     }
 
-    pub fn set(&mut self, key: &String, new_value: Vec<u8>) -> io::Result<()> {
-        let (start, end) = match self.map.get(key) {
-            Some((_, start, end)) => (*start, *end),
+    pub fn sorted_end_value_offsets(&self) -> Vec<usize> {
+        let mut offsets: Vec<usize> = Vec::new();
+        for (_, (_, _, end)) in &self.map {
+            offsets.push(*end);
+        }
+        offsets.sort();
+        offsets
+    }
+
+    pub fn set(
+        &mut self,
+        key: &String,
+        new_value: Vec<u8>,
+        descriptions: &Vec<String>,
+    ) -> io::Result<()> {
+        let (mut line_offset, start, mut end) = match self.map.get(key) {
+            Some((lo, s, e)) => (*lo, *s, *e),
             None => {
-                // add new line to last buf since we're adding new variable
                 self.buf.push(b'\n');
-                (self.buf.len(), self.buf.len())
+                (0, self.buf.len(), self.buf.len())
             }
         };
 
         // handle new variable creation, otherwise update the existing variable's value
         if start == end {
+            if !descriptions.is_empty() {
+                for content in descriptions {
+                    let comments_line = format!("# {}\n", content).into_bytes();
+                    self.buf.extend(comments_line);
+                }
+            }
             let mut line = format!("{}=", key).into_bytes();
             line.extend_from_slice(&new_value);
             self.buf.extend(line);
         } else {
-            self.buf.splice(start..end, new_value.iter().cloned());
+            if !descriptions.is_empty() {
+                let end_offsets = self.sorted_end_value_offsets();
+                let mut previous_end_offset = None;
+
+                // find previous variable end offset from current variable we're reading
+                for (i, &e) in end_offsets.iter().enumerate() {
+                    if end == e && i > 0 {
+                        previous_end_offset = Some(end_offsets[i - 1]);
+                        break;
+                    }
+                }
+
+                // remove existing descriptions lines to make my life easier :)
+                if let Some(prev) = previous_end_offset {
+                    let deleted_len = line_offset - (prev + 1);
+                    self.buf.drain(prev + 1..line_offset);
+
+                    // adjust current variable offsets since we are removing all the existing
+                    // descriptions
+                    line_offset -= deleted_len;
+                    end -= deleted_len;
+                }
+
+                // keep current variable value as temp
+                let old_value: Vec<u8> = self.buf[line_offset..end].to_vec();
+                // delete current variable line values because we're adding new description
+                // on current line_offset
+                self.buf.drain(line_offset..end);
+
+                let mut comments_bytes: Vec<u8> = Vec::new();
+                for desc in descriptions {
+                    comments_bytes.extend_from_slice(b"# ");
+                    comments_bytes.extend_from_slice(desc.as_bytes());
+                    comments_bytes.push(b'\n');
+                }
+
+                self.buf
+                    .splice(line_offset..line_offset, comments_bytes.clone());
+
+                self.buf.splice(
+                    line_offset + comments_bytes.len()..line_offset + comments_bytes.len(),
+                    old_value,
+                );
+            } else {
+                self.buf.splice(start..end, new_value);
+            }
         }
 
         self.write_buf()?;

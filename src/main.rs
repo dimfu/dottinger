@@ -23,7 +23,14 @@ enum Commands {
     Get { key: String },
 
     #[command(about = "Update variable value")]
-    Set { key: String, value: String },
+    Set {
+        key: String,
+        value: String,
+
+        /// Optional description
+        #[arg(short, long)]
+        descriptions: Vec<String>,
+    },
 
     #[command(about = "Disable/comment variable")]
     Disable { key: String },
@@ -48,8 +55,12 @@ fn main() -> io::Result<()> {
             Ok(val) => println!("Value: {val}"),
             Err(e) => eprintln!("Error: {}", e),
         },
-        Commands::Set { key, value } => {
-            if let Err(e) = env.set(&key, value.as_bytes().to_vec()) {
+        Commands::Set {
+            key,
+            value,
+            descriptions,
+        } => {
+            if let Err(e) = env.set(&key, value.as_bytes().to_vec(), &descriptions) {
                 eprintln!("Failed to update key: {}", e);
             } else {
                 println!("Key updated successfully");
