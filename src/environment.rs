@@ -97,7 +97,7 @@ impl Environment {
         }
     }
 
-    pub fn sorted_end_value_offsets(&self) -> Vec<usize> {
+    fn sorted_end_value_offsets(&self) -> Vec<usize> {
         let mut offsets: Vec<usize> = Vec::new();
         for (_, (_, _, end)) in &self.map {
             offsets.push(*end);
@@ -112,16 +112,18 @@ impl Environment {
         new_value: Vec<u8>,
         descriptions: &Vec<String>,
     ) -> io::Result<()> {
+        let mut is_new = false;
         let (mut line_offset, start, mut end) = match self.map.get(key) {
             Some((lo, s, e)) => (*lo, *s, *e),
             None => {
+                is_new = true;
                 self.buf.push(b'\n');
                 (0, self.buf.len(), self.buf.len())
             }
         };
 
         // handle new variable creation, otherwise update the existing variable's value
-        if start == end {
+        if start == end && is_new {
             if !descriptions.is_empty() {
                 for content in descriptions {
                     let comments_line = format!("# {}\n", content).into_bytes();
