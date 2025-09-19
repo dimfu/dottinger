@@ -84,8 +84,6 @@ impl Environment {
             line_offset += n;
         }
 
-        println!("{self}");
-
         Ok(())
     }
 
@@ -103,11 +101,21 @@ impl Environment {
         let (start, end) = match self.map.get(key) {
             Some((_, start, end)) => (*start, *end),
             None => {
-                return Err(io::Error::new(io::ErrorKind::NotFound, "doesn't exist"));
+                // add new line to last buf since we're adding new variable
+                self.buf.push(b'\n');
+                (self.buf.len(), self.buf.len())
             }
         };
 
-        self.buf.splice(start..end, new_value.iter().cloned());
+        // handle new variable creation, otherwise update the existing variable's value
+        if start == end {
+            let mut line = format!("{}=", key).into_bytes();
+            line.extend_from_slice(&new_value);
+            self.buf.extend(line);
+        } else {
+            self.buf.splice(start..end, new_value.iter().cloned());
+        }
+
         self.write_buf()?;
 
         Ok(())

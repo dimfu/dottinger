@@ -22,7 +22,7 @@ enum Commands {
     #[command(about = "Get environment value by providing key")]
     Get { key: String },
 
-    #[command(about = "Update existing variable")]
+    #[command(about = "Update variable value")]
     Set { key: String, value: String },
 
     #[command(about = "Disable/comment variable")]
