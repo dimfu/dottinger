@@ -206,9 +206,38 @@ impl Environment {
                     self.buf
                         .splice(line_offset..line_offset + 1, std::iter::empty());
                 } else {
-                    return Err(io::Error::new(io::ErrorKind::NotFound, "already enabled"));
+                    return Err(io::Error::new(io::ErrorKind::Other, "already enabled"));
                 }
             }
+        }
+
+        self.write_buf()?;
+
+        Ok(())
+    }
+
+    pub fn delete(&mut self, key: &String) -> io::Result<()> {
+        let end = match self.map.get(key) {
+            Some((_, _, e)) => *e,
+            None => {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "doesn't exist"));
+            }
+        };
+
+        let end_offsets = self.sorted_end_value_offsets();
+        let mut previous_end_offset = None;
+
+        // find previous variable end offset from current variable we're reading
+        for (i, &e) in end_offsets.iter().enumerate() {
+            if end == e && i > 0 {
+                previous_end_offset = Some(end_offsets[i - 1]);
+                break;
+            }
+        }
+
+        // clear all the way until it reaches the previous variable line
+        if let Some(prev) = previous_end_offset {
+            self.buf.drain(prev..end);
         }
 
         self.write_buf()?;

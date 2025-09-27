@@ -32,6 +32,9 @@ enum Commands {
         descriptions: Vec<String>,
     },
 
+    #[command(about = "Delete variable")]
+    Delete { key: String },
+
     #[command(about = "Disable/comment variable")]
     Disable { key: String },
 
@@ -64,6 +67,13 @@ fn main() -> io::Result<()> {
                 eprintln!("Failed to update key: {}", e);
             } else {
                 println!("Key updated successfully");
+            }
+        }
+        Commands::Delete { key } => {
+            if let Err(e) = env.delete(&key) {
+                eprintln!("Failed to delete key: {}", e);
+            } else {
+                println!("Key deleted successfully");
             }
         }
         Commands::Disable { key } => {
